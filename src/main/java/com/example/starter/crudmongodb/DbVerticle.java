@@ -1,5 +1,7 @@
 package com.example.starter.crudmongodb;
 
+import java.util.stream.Collectors;
+
 import com.example.starter.config.MongoConfig;
 
 import io.vertx.core.AbstractVerticle;
@@ -7,6 +9,8 @@ import io.vertx.core.Promise;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import io.vertx.ext.mongo.AggregateOptions;
+import io.vertx.ext.mongo.FindOptions;
 import io.vertx.ext.mongo.MongoClient;
 
 public class DbVerticle extends AbstractVerticle {
@@ -24,6 +28,10 @@ public class DbVerticle extends AbstractVerticle {
         vertx.eventBus().consumer("db.update", this::updateDocument);
         vertx.eventBus().consumer("db.delete", this::deleteDocument);
         vertx.eventBus().consumer("db.findOne", this::findOneDocument);
+
+        vertx.eventBus().consumer("db.findWithOptions", this::findWithOptions);
+        vertx.eventBus().consumer("db.count", this::count);
+        vertx.eventBus().consumer("db.aggregate", this::aggregate);
 
         startPromise.complete();
     }
@@ -103,4 +111,51 @@ public class DbVerticle extends AbstractVerticle {
           }
       });
   }
+
+  private void findWithOptions(Message<JsonObject> message) {
+    JsonObject payload = message.body();
+    String collection = payload.getString("collection");
+    JsonObject query = payload.getJsonObject("query");
+    FindOptions options = new FindOptions(payload.getJsonObject("options"));
+
+    mongoClient.findWithOptions(collection, query, options, res -> {
+      if (res.succeeded()) {
+        message.reply(new JsonArray(res.result()));
+      } else {
+        message.fail(500, res.cause().getMessage());
+      }
+    });
+  }
+
+  private void count(Message<JsonObject> message) {
+    JsonObject payload = message.body();
+    String collection = payload.getString("collection");
+    JsonObject query = payload.getJsonObject("query");
+
+    mongoClient.count(collection, query, res -> {
+      if (res.succeeded()) {
+        message.reply(new JsonObject().put("count", res.result()));
+      } else {
+        message.fail(500, res.cause().getMessage());
+      }
+    });
+  }
+
+  private void aggregate(Message<JsonObject> message) {
+    JsonObject payload = message.body();
+    String collection = payload.getString("collection");
+    JsonArray pipeline = payload.getJsonArray("pipeline");
+    AggregateOptions options = new AggregateOptions(payload.getJsonObject("options"));
+
+    mongoClient
+        .aggregateWithOptions(collection, pipeline, options)
+        .collect(Collectors.toList())
+        .onComplete(res -> {
+            if (res.succeeded()) {
+                message.reply(new JsonArray(res.result()));
+            } else {
+                message.fail(500, res.cause().getMessage());
+            }
+        });
+}
 }
